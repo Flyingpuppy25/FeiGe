@@ -1,6 +1,6 @@
 {
   "name": "feige-storyboard",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "FeiGe local-first AI video breakdown, storyboard analysis, and script export workbench",
   "main": "src/main.js",
   "author": "FeiGe",
@@ -8,10 +8,12 @@
   "scripts": {
     "start": "electron .",
     "setup:ffmpeg": "node scripts/fetch-ffmpeg.js",
+    "setup:ffmpeg:mac": "bash scripts/build-ffmpeg-macos.sh",
     "test": "node scripts/self-test.js",
     "test:ui": "electron . --ui-smoke-test",
     "pack": "electron-builder --win dir",
-    "dist": "electron-builder --win zip"
+    "dist": "electron-builder --win zip",
+    "dist:mac": "npm run setup:ffmpeg:mac && electron-builder --mac dir --config electron-builder.mac.js && bash scripts/package-macos.sh"
   },
   "devDependencies": {
     "electron": "^37.2.0",
@@ -28,7 +30,7 @@
     ],
     "extraResources": [
       {
-        "from": "vendor",
+        "from": "vendor/win32-x64",
         "to": "vendor",
         "filter": [
           "**/*"

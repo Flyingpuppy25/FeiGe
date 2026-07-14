@@ -1,5 +1,7 @@
 node_modules/
 release/
+dist/
+release-mac/
 outputs/
 .ffmpeg-download/
 FeiGeData/
@@ -28,3 +30,6 @@ Thumbs.db
 
 vendor/*.exe
 vendor/*.dll
+vendor/win32-x64/
+vendor/darwin-x64/
+vendor/darwin-arm64/

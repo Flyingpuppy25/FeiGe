@@ -1,0 +1,30 @@
+FeiGe 0.4.2 macOS 使用说明
+
+一、选择正确版本
+
+- Apple 芯片 Mac（M1、M2、M3、M4、M5 等）：下载 FeiGe-0.4.2-macOS-arm64.zip
+- Intel 芯片 Mac：下载 FeiGe-0.4.2-macOS-x64.zip
+- 系统要求：macOS 12 Monterey 或更高版本
+
+二、运行
+
+1. 解压 ZIP，把“FeiGe.app”拖到任意本地文件夹，也可以放入“应用程序”。
+2. 首次运行请右键 FeiGe.app，选择“打开”，然后再次确认“打开”。
+3. 如果系统仍然拦截：打开“系统设置 → 隐私与安全性”，找到 FeiGe 的提示并选择“仍要打开”。
+4. 只有上述方法仍无效时，才在终端进入 FeiGe.app 所在目录并执行：
+
+   xattr -dr com.apple.quarantine FeiGe.app
+
+当前开源构建没有 Apple Developer 证书，因此使用临时签名，不代表应用损坏。
+
+三、数据与隐私
+
+- 项目、设置和本地数据库保存在：~/Library/Application Support/FeiGe
+- API Key 由用户自行填写，并通过 Electron 的系统安全存储能力保护。
+- API Key、设置文件、私人视频和项目数据不会打进发布压缩包。
+- 删除 FeiGe.app 不会自动删除项目数据；需要完全清理时再手动删除上述 FeiGe 文件夹。
+
+四、说明
+
+两个安装包分别由 Intel 与 Apple 芯片 GitHub macOS 构建机原生生成并自动检查。
+正式发布前仍建议分别在一台真实 Intel Mac 和一台 Apple 芯片 Mac 上完成视频导入、拆镜、AI 识别和导出验收。

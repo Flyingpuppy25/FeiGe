@@ -1,20 +1,27 @@
 # FeiGe
 
-本地优先的 Windows AI 视频拆片、分镜识别与剧本导出工作台。
+本地优先的 Windows / macOS AI 视频拆片、分镜识别与剧本导出工作台。
 
-Local-first Windows workbench for AI video breakdown, storyboard analysis,
+Local-first Windows and macOS workbench for AI video breakdown, storyboard analysis,
 script generation, and production-ready exports.
 
 FeiGe 是独立实现的开源软件，不包含其他商业软件的源码、授权绕过代码或品牌素材。
 
 ## 下载 / Download
 
-从 [GitHub Releases](https://github.com/RenoJOY2025/FeiGe/releases) 下载
-`FeiGe-0.4.0-Windows-绿色版.zip`，解压后运行 `FeiGe.exe`，无需安装。
+从项目的 GitHub Releases 下载与电脑匹配的压缩包：
 
-Download `FeiGe-0.4.0-Windows-绿色版.zip` from
-[GitHub Releases](https://github.com/RenoJOY2025/FeiGe/releases), extract it,
-and run `FeiGe.exe`. No installer is required.
+- Windows 64 位：`FeiGe-0.4.2-Windows-绿色版.zip`
+- Apple 芯片（M1/M2/M3/M4/M5）：`FeiGe-0.4.2-macOS-arm64.zip`
+- Intel Mac：`FeiGe-0.4.2-macOS-x64.zip`
+
+全部版本均无需安装。Windows 解压后运行 `FeiGe.exe`；macOS 解压后运行
+`FeiGe.app`。macOS 版本支持 macOS 12 及以上，首次打开方式见
+[`docs/macOS使用说明.txt`](docs/macOS使用说明.txt)。
+
+Download the ZIP matching your computer from GitHub Releases. All builds are
+portable: run `FeiGe.exe` on Windows or `FeiGe.app` on macOS 12+. Apple Silicon
+uses `arm64`; Intel Macs use `x64`.
 
 ## 主要功能 / Highlights
 
@@ -29,7 +36,10 @@ and run `FeiGe.exe`. No installer is required.
 - 429、5xx、网络错误和超时采用最多4次指数退避重试
 - 导出嵌图Excel分镜表、Word剧本、自包含HTML页面和分享ZIP
 - 中文与English界面即时切换
-- API Key由用户在本机填写，并使用Windows安全存储能力保护
+- API Key由用户在本机填写，并使用系统安全存储能力保护
+- 设置页提供一个统一的 API 连接测试按钮，一次检查全部已完整配置的接口
+- 项目与风格研究条目均提供三点菜单：重命名、在文件夹中打开、永久删除
+- 风格研究按“准备 → 分镜拆解 → 构建拼图 → AI 提炼”四阶段执行并显示进度
 
 English summary:
 
@@ -52,8 +62,9 @@ English summary:
 5. 生成剧本，在版本栏中比较不同API或模型的结果。
 6. 导出Word、Excel、HTML，或一次生成完整分享包。
 
-Project data is stored in `FeiGeData` beside the green application. API keys
-remain local and are not included in exported project ZIP files.
+Windows 项目数据保存在绿色版旁边的 `FeiGeData`；macOS 项目数据保存在
+`~/Library/Application Support/FeiGe`。API Key 仅保存在本机，不会写入导出的
+项目 ZIP。
 
 ## 支持的接口 / Model APIs
 
@@ -83,6 +94,16 @@ npm run pack
 Application code is in `src/`. The green package already includes the Windows
 x64 LGPL shared FFmpeg runtime. Source checkouts intentionally omit those large
 binaries; run `npm run setup:ffmpeg` once before local development or packaging.
+
+macOS 包必须在对应架构的 Mac 上构建。仓库已提供 GitHub Actions 工作流，分别
+使用 Intel 与 Apple 芯片构建机生成两个 ZIP；操作说明见
+[`docs/构建macOS.md`](docs/构建macOS.md)。在 Mac 本机也可运行：
+
+```text
+npm ci
+npm test
+npm run dist:mac
+```
 
 ## 安全 / Security
 

@@ -38,10 +38,34 @@ function detectionTests() {
 function interfaceTests() {
   const html = fs.readFileSync(path.join(root,'src','index.html'),'utf8');
   const renderer = fs.readFileSync(path.join(root,'src','renderer.js'),'utf8');
+  const main = fs.readFileSync(path.join(root,'src','main.js'),'utf8');
+  const packageJson = require(path.join(root,'package.json'));
   const allIds = [...html.matchAll(/id="([^"]+)"/g)].map(match => match[1]);
   assert.strictEqual(new Set(allIds).size,allIds.length,'unique DOM ids');
-  for(const id of ['differenceCanvas','scriptVersion','regenerateScript','deleteScriptVersion','shotEditDialog','sceneEditDialog','contextMenu'])assert(html.includes(`id="${id}"`),`required UI element ${id}`);
-  for(const channel of ['update-shot','delete-shot','save-script-scenes','activate-script-version','delete-script-version'])assert(renderer.includes(`'${channel}'`),`renderer channel ${channel}`);
+  for(const id of ['differenceCanvas','scriptVersion','regenerateScript','deleteScriptVersion','shotEditDialog','sceneEditDialog','contextMenu','researchWorkflow','testAllProviders','providerTestResults','renameProjectDialog'])assert(html.includes(`id="${id}"`),`required UI element ${id}`);
+  for(const channel of ['update-shot','delete-shot','save-script-scenes','activate-script-version','delete-script-version','rename-project','delete-project','run-style-research','refine-style-research','test-providers'])assert(renderer.includes(`'${channel}'`),`renderer channel ${channel}`);
+  assert(!html.includes('id="testProvider"'),'only one API test button');
+  const stageOrder=[...html.matchAll(/data-research-stage="([^"]+)"/g)].map(match=>match[1]);
+  assert.deepStrictEqual(stageOrder,['prepare','split','collage','refine'],'research workflow order');
+  assert(main.includes('Menu.setApplicationMenu(null)')&&main.includes('setMenuBarVisibility(false)'),'native menu hidden');
+  assert(main.includes('projectDirFromIdentity')&&/fsp\.rm\(dir,\s*\{\s*recursive:true,\s*force:true\s*\}\)/.test(main),'safe permanent delete');
+  assert.strictEqual(packageJson.version,'0.4.2','release version');
+}
+
+function macPackagingTests() {
+  const main = fs.readFileSync(path.join(root,'src','main.js'),'utf8');
+  const config = fs.readFileSync(path.join(root,'electron-builder.mac.js'),'utf8');
+  const workflow = fs.readFileSync(path.join(root,'.github','workflows','build-macos.yml'),'utf8');
+  const buildFfmpeg = fs.readFileSync(path.join(root,'scripts','build-ffmpeg-macos.sh'),'utf8');
+  const packageMac = fs.readFileSync(path.join(root,'scripts','package-macos.sh'),'utf8');
+  assert(main.includes("process.platform === 'win32'") && main.includes("app.setPath('userData'"),'Windows-only portable data location');
+  assert(main.includes("process.platform === 'darwin'") && main.includes("app.setName('FeiGe')"),'macOS app data identity');
+  assert(main.includes("vendor', `${process.platform}-${process.arch}`"),'platform-specific development tools');
+  for(const value of ["minimumSystemVersion: '12.0'","identity: '-'","hardenedRuntime: false","`darwin-${arch}`"])assert(config.includes(value),`mac config ${value}`);
+  for(const value of ['macos-15-intel','macos-15','arch: x64','arch: arm64','permissions:','contents: read','actions/upload-artifact@v4'])assert(workflow.includes(value),`mac workflow ${value}`);
+  assert(!workflow.includes('contents: write') && !workflow.includes('softprops/action-gh-release'),'workflow must not publish automatically');
+  for(const value of ['FFMPEG_VERSION="7.1.5"','de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f','--enable-shared','--disable-gpl','--disable-nonfree',"--install-name-dir='@executable_path'"])assert(buildFfmpeg.includes(value),`mac FFmpeg ${value}`);
+  for(const value of ['ditto -c -k --sequesterRsrc --keepParent','codesign --verify --deep --strict','macOS使用说明.txt'])assert(packageMac.includes(value),`mac package ${value}`);
 }
 
 function translationTests() {
@@ -54,6 +78,16 @@ function translationTests() {
     for(const match of value.matchAll(/data-i18n(?:-[a-z-]+)?="([^"]+)"/g))used.add(match[1]);
     for(const match of value.matchAll(/\bt\(['"]([^'"]+)['"]/g))used.add(match[1]);
   }
+  for(const key of [
+    'action.testAllProviders','project.rename','project.openFolder','project.delete','project.renameTitle',
+    'research.pipeline','research.waiting','research.running','research.complete','research.failed',
+    'research.prepare','research.split','research.collage','research.refine','research.run','research.report','research.refineAgain',
+    'research.reportVersion','research.rawReport','research.localHint','research.saveReport','research.reportPlaceholder','research.emptyTitle','research.emptyBody',
+    'settings.connectionSuccess',
+    'progress.testingProviders','progress.runningResearch','progress.refiningResearch','progress.deletingProject',
+    'toast.allConnectionsSuccess','toast.someConnectionsFailed','toast.projectRenamed','toast.projectDeleted','toast.researchComplete','toast.researchRefined',
+    'confirm.deleteProject','error.connectionFailed','error.researchFailed','error.projectNameRequired'
+  ])used.add(key);
   for(const locale of ['zh-CN','en-US']){
     api.setLocale(locale);
     const missing=[...used].filter(key=>api.t(key)===key);
@@ -64,4 +98,5 @@ function translationTests() {
 detectionTests();
 interfaceTests();
 translationTests();
+macPackagingTests();
 console.log('FeiGe self-test passed');

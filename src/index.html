@@ -27,6 +27,9 @@
     <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
     <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
     <symbol id="icon-alert" viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4Z"/><path d="M12 9v5m0 3h.01"/></symbol>
+    <symbol id="icon-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="icon-pencil" viewBox="0 0 24 24"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10Z"/><path d="m14 7 3 3M4 20l1-4 3 3Z"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 3h6l1 4H8Z"/><path d="m7 7 1 14h8l1-14M10 11v6M14 11v6"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -169,6 +172,15 @@
                 </button>
               </div>
             </div>
+            <section id="researchWorkflow" class="research-workflow hidden" aria-live="polite">
+              <header><span data-i18n="research.pipeline">处理流水</span><small id="researchWorkflowStatus" data-i18n="research.waiting">等待开始</small></header>
+              <ol>
+                <li data-research-stage="prepare"><span class="stage-dot"></span><svg class="icon"><use href="#icon-video"/></svg><b data-i18n="research.prepare">准备</b><small data-stage-detail></small></li>
+                <li data-research-stage="split"><span class="stage-dot"></span><svg class="icon"><use href="#icon-film"/></svg><b data-i18n="research.split">分镜拆解</b><small data-stage-detail></small></li>
+                <li data-research-stage="collage"><span class="stage-dot"></span><svg class="icon"><use href="#icon-stack"/></svg><b data-i18n="research.collage">构建拼图</b><small data-stage-detail></small></li>
+                <li data-research-stage="refine"><span class="stage-dot"></span><svg class="icon"><use href="#icon-wand"/></svg><b data-i18n="research.refine">AI 提炼</b><small data-stage-detail></small></li>
+              </ol>
+            </section>
           </section>
 
           <section class="editor-panel panel">
@@ -247,6 +259,11 @@
         <section class="settings-section provider-section">
           <div class="section-heading"><span><b data-i18n="settings.providerTitle">模型接口</b><small data-i18n="settings.providerHint">选择预设，或添加任意 OpenAI 兼容接口</small></span></div>
           <div class="settings-layout"><nav id="providerNav" data-i18n-aria-label="a11y.providers"></nav><section id="providerForm"></section></div>
+          <div class="provider-test-all">
+            <button id="testAllProviders" type="button"><svg class="icon"><use href="#icon-scan"/></svg><span data-i18n="action.testAllProviders">测试全部已配置接口</span></button>
+            <div><b data-i18n="settings.connectionTest">API 连接测试</b><small data-i18n="settings.connectionTestHint">发送一次最小请求，验证地址、密钥和模型是否可用</small></div>
+          </div>
+          <div id="providerTestResults" class="provider-test-results hidden" role="status" aria-live="polite"></div>
         </section>
 
         <section class="settings-section">
@@ -301,6 +318,17 @@
       <div class="dialog-head"><div><span class="eyebrow" data-i18n="script.sceneEyebrow">SCRIPT SCENE</span><h3 id="sceneEditTitle">编辑场景</h3></div><button value="cancel" class="icon-button" data-i18n-aria-label="common.close"><svg class="icon"><use href="#icon-close"/></svg></button></div>
       <label><span data-i18n="script.sceneSource">场景原文</span><textarea id="editSceneSource"></textarea></label>
       <div class="dialog-actions"><button value="cancel" data-i18n="common.cancel">取消</button><button id="saveSceneEdit" type="button" class="primary"><svg class="icon"><use href="#icon-check"/></svg><span data-i18n="common.save">保存</span></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="renameProjectDialog">
+    <form method="dialog" class="dialog-card compact-dialog">
+      <div class="dialog-head">
+        <div><span class="eyebrow" data-i18n="project.manageEyebrow">PROJECT MANAGEMENT</span><h3 data-i18n="project.renameTitle">重命名项目</h3></div>
+        <button value="cancel" class="icon-button" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="icon"><use href="#icon-close"/></svg></button>
+      </div>
+      <label><span data-i18n="field.projectName">项目名称</span><input id="renameProjectName" maxlength="120"></label>
+      <div class="dialog-actions"><button value="cancel" data-i18n="common.cancel">取消</button><button id="saveProjectRename" type="button" class="primary"><svg class="icon"><use href="#icon-check"/></svg><span data-i18n="common.save">保存</span></button></div>
     </form>
   </dialog>
 

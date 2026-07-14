@@ -1,7 +1,7 @@
 const fs=require('fs');const fsp=fs.promises;const path=require('path');const crypto=require('crypto');const{spawn}=require('child_process');const{ProxyAgent}=require('undici');
 const root=path.resolve(__dirname,'..'),video=process.argv[2],config=process.argv[3],workspace=process.argv[4];
 if(!video||!config||!workspace)throw new Error('Usage: node integration-test.js <video> <config.yaml> <workspace>');
-const ff=path.join(root,'vendor','ffmpeg.exe'),fp=path.join(root,'vendor','ffprobe.exe');
+const ff=path.join(root,'vendor','win32-x64','ffmpeg.exe'),fp=path.join(root,'vendor','win32-x64','ffprobe.exe');
 const run=(cmd,args,onOut)=>new Promise((resolve,reject)=>{const p=spawn(cmd,args,{windowsHide:true});let out='',err='';p.stdout.on('data',d=>{out+=d;onOut?.(d)});p.stderr.on('data',d=>err+=d);p.on('error',reject);p.on('close',c=>c===0?resolve({out,err}):reject(new Error(err||String(c))))});
 const tc=s=>[Math.floor(s/3600),Math.floor(s%3600/60),Math.floor(s%60)].map(x=>String(x).padStart(2,'0')).join(':');
 async function info(){const{out}=await run(fp,['-v','error','-select_streams','v:0','-show_entries','stream=width,height:format=duration','-of','json',video]);const j=JSON.parse(out),s=j.streams[0];return{width:s.width,height:s.height,duration:+j.format.duration}}

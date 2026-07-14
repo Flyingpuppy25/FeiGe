@@ -25,6 +25,8 @@ let state = {
   activeScene: ALL_SCENES,
   activeTab: 'shots',
   editing: null,
+  renaming: null,
+  providerTestResults: null,
   lastProgress: null,
   localeChanging: false,
   renderToken: 0,
@@ -89,7 +91,8 @@ function updateActionStates() {
     button.disabled=busy||locked;
   });
   $$('[data-script-edit],[data-script-insert],[data-script-delete]').forEach(button => { button.disabled=busy; });
-  $$('.nav-item, [data-kind]').forEach(button => { button.disabled = busy; });
+  $$('.nav-item, .nav-more, [data-kind]').forEach(button => { button.disabled = busy; });
+  if ($('#testAllProviders')) $('#testAllProviders').disabled = busy;
 }
 
 function splitScriptScenesClient(script) {
@@ -139,7 +142,7 @@ function renderScriptPanel() {
         <button type="button" data-script-insert="${index}" aria-label="${esc(t('common.insertAfter'))}" title="${esc(t('common.insertAfter'))}">${icon('plus')}<span>${esc(t('common.insertAfter'))}</span></button>
         <button type="button" data-script-delete="${index}" class="danger-quiet" aria-label="${esc(t('common.delete'))}" title="${esc(t('common.delete'))}">${icon('close')}<span>${esc(t('common.delete'))}</span></button>
       </div></header><pre>${esc(scene)}</pre></article>`;
-  }).join('') : `<div class="empty-script"><b>${esc(t('script.emptyTitle'))}</b><p>${esc(t('script.emptyBody'))}</p></div>`;
+  }).join('') : `<div class="empty-script"><b>${esc(t(state.currentKind==='research'?'research.emptyTitle':'script.emptyTitle'))}</b><p>${esc(t(state.currentKind==='research'?'research.emptyBody':'script.emptyBody'))}</p></div>`;
   $('#scriptEditor').value = item?.script || '';
   updateActionStates();
 }
@@ -243,11 +246,92 @@ function renderList(id, items, kind) {
   const navIcon = kind === 'research' ? 'stack' : 'film';
   root.innerHTML = items.length
     ? items.map(project => `
-      <button class="nav-item ${state.current?.id === project.id ? 'active' : ''}" data-id="${esc(project.id)}" data-kind="${kind}" type="button">
-        <span class="thumb">${icon(navIcon)}</span>
-        <span><span>${esc(project.name)}</span><small>${esc(projectCount(project.shots?.length || 0))}</small></span>
-      </button>`).join('')
+      <div class="nav-row ${state.current?.id === project.id ? 'active' : ''}" data-project-id="${esc(project.id)}" data-project-kind="${kind}">
+        <button class="nav-item ${state.current?.id === project.id ? 'active' : ''}" data-id="${esc(project.id)}" data-kind="${kind}" type="button">
+          <span class="thumb">${icon(navIcon)}</span>
+          <span><span>${esc(project.name)}</span><small>${esc(projectCount(project.shots?.length || 0))}</small></span>
+        </button>
+        <button class="nav-more" data-project-menu="${esc(project.id)}" data-project-kind="${kind}" type="button" aria-label="${esc(t('project.moreActions',{name:project.name}))}" title="${esc(t('project.moreActions',{name:project.name}))}">${icon('more')}</button>
+      </div>`).join('')
     : `<div class="nav-empty">${esc(t('nav.empty'))}</div>`;
+}
+
+function findProjectInLists(id, kind) {
+  const list = kind === 'research' ? state.lists.research : state.lists.projects;
+  return list.find(project => project.id === id);
+}
+
+function showProjectMenu(id, kind, x, y) {
+  showContextMenu([
+    {action:'rename-project',value:`${kind}:${id}`,icon:'pencil',label:t('project.rename')},
+    {action:'open-project-folder',value:`${kind}:${id}`,icon:'folder',label:t('project.openFolder')},
+    {action:'delete-project',value:`${kind}:${id}`,icon:'trash',label:t('project.delete')}
+  ],x,y);
+}
+
+function openRenameProject(id, kind) {
+  const project=findProjectInLists(id,kind);
+  if(!project)return;
+  state.renaming={id,kind};
+  $('#renameProjectName').value=project.name||'';
+  $('#renameProjectDialog').showModal();
+  $('#renameProjectName').focus();
+  $('#renameProjectName').select();
+}
+
+function clearCurrentProject() {
+  const video=$('#video');
+  video.pause();video.removeAttribute('src');video.load();
+  state.current=null;state.currentKind='project';state.activeScene=ALL_SCENES;state.frameCache.clear();state.editing=null;
+  closeEditDialogs();
+  $('#workspace').classList.add('hidden');
+  $('#emptyView').classList.remove('hidden');
+  updateActionStates();
+}
+
+function renderProviderTestResults() {
+  const root=$('#providerTestResults'),results=state.providerTestResults;
+  if(!root)return;
+  if(!results?.length){root.classList.add('hidden');root.innerHTML='';return;}
+  root.classList.remove('hidden');
+  root.innerHTML=results.map(result=>`<div class="provider-test-result ${result.ok?'success':'error'}">
+    ${icon(result.ok?'check':'alert')}<b>${esc(result.label)} · ${esc(result.model)}</b>
+    <span>${esc(result.ok?t('settings.connectionSuccess'):readableError(result.error))}</span>
+    <time>${Math.max(1,Math.round(result.durationMs/100)/10)}s</time>
+  </div>`).join('');
+}
+
+function renderResearchWorkflow() {
+  const research=state.currentKind==='research',panel=$('#researchWorkflow'),videoPanel=$('.video-panel');
+  panel.classList.toggle('hidden',!research);videoPanel.classList.toggle('research-mode',research);
+  if(!research)return;
+  const workflow=state.current?.researchWorkflow||{status:'idle',stages:{}};
+  const statusKey=workflow.status==='done'?'research.complete':workflow.status==='failed'?'research.failed':workflow.status==='running'?'research.running':'research.waiting';
+  $('#researchWorkflowStatus').textContent=t(statusKey);
+  $$('[data-research-stage]').forEach(row=>{
+    const stage=workflow.stages?.[row.dataset.researchStage]||{};
+    row.classList.remove('running','done','failed');
+    if(stage.status)row.classList.add(stage.status);
+    row.querySelector('[data-stage-detail]').textContent=stage.detail?localizeRuntimeMessage(stage.detail):'';
+  });
+}
+
+function applyProjectKindUi() {
+  const research=state.currentKind==='research';
+  const detectText=$('#detectBtn span'),detectIcon=$('#detectBtn use');
+  detectText.textContent=t(research?'research.run':'video.autoSplit');
+  detectIcon.setAttribute('href',research?'#icon-wand':'#icon-scissors');
+  $('#scriptTab span').textContent=t(research?'research.report':'editor.script');
+  $('#generateScript span').textContent=t(research?'research.refineAgain':'editor.generateScript');
+  $('#regenerateScript span').textContent=t(research?'research.refineAgain':'script.regenerate');
+  $('.script-versionbar label > span').textContent=t(research?'research.reportVersion':'script.version');
+  $('.raw-script summary').textContent=t(research?'research.rawReport':'script.rawEdit');
+  $('.script-footer > span').textContent=t(research?'research.localHint':'script.localHint');
+  $('#saveScript span').textContent=t(research?'research.saveReport':'script.save');
+  $('#scriptEditor').placeholder=t(research?'research.reportPlaceholder':'script.placeholder');
+  $('#retryFailed').classList.toggle('hidden',research);
+  $('#analyzeAll').classList.toggle('hidden',research);
+  renderResearchWorkflow();
 }
 
 function updateProjectIdentity() {
@@ -256,6 +340,7 @@ function updateProjectIdentity() {
   $('#videoName').textContent = state.current.videoPath.split(/[\\/]/).pop();
   $('#kindBadge').textContent = t(state.currentKind === 'research' ? 'project.kind.research' : 'project.kind.project');
   $('#durationLabel').textContent = formatTime(state.current.duration);
+  applyProjectKindUi();
 }
 
 async function openProject(id, kind) {
@@ -391,6 +476,7 @@ function openNew(kind) {
 
 async function loadSettings() {
   state.settings = await window.feige.invoke('get-settings');
+  state.providerTestResults = null;
   const mode = state.settings.detectionMode === 'classic' ? 'classic' : 'hybrid';
   const modeInput = $(`input[name="detectionMode"][value="${mode}"]`);
   if (modeInput) modeInput.checked = true;
@@ -405,6 +491,7 @@ async function loadSettings() {
   $('#scriptPrompt').value = state.settings.scriptPrompt;
   state.providerId = state.settings.activeProvider;
   renderProviders();
+  renderProviderTestResults();
   updateDetectionSettingVisibility();
 }
 
@@ -433,7 +520,6 @@ function renderProviders() {
     <label><span>${esc(t('field.baseUrl'))}</span><input id="pUrl" value="${esc(provider.baseUrl)}"></label>
     <label><span>${esc(t('field.modelName'))}</span><input id="pModel" value="${esc(provider.model)}"></label>
     <label class="field-wide"><span>${esc(t('field.apiKey'))}</span><input id="pKey" type="password" value="${esc(provider.apiKey || '')}" placeholder="${esc(keyHint)}"></label>
-    <div class="provider-test"><button id="testProvider" type="button">${icon('scan')}<span>${esc(t('action.testProvider'))}</span></button><span>${provider.hasApiKey ? esc(t('settings.apiKeySaved')) : ''}</span></div>
   </div>`;
 }
 
@@ -528,7 +614,7 @@ async function changeLocale(locale) {
       await renderCurrent();
       $('#shots').scrollTop = shotScroll;
     }
-    if (state.settings) renderProviders();
+    if (state.settings) { renderProviders(); renderProviderTestResults(); }
     $('#scriptEditor').scrollTop = scriptScroll;
     $('#newTitle').textContent = t(state.newKind === 'research' ? 'dialog.newResearch' : 'dialog.newProject');
     if (state.lastProgress?.message) {
@@ -552,6 +638,7 @@ document.addEventListener('click', async event => {
   if (menuAction) {
     const { menuAction:action, menuValue:value } = menuAction.dataset;
     hideContextMenu();
+    const separator=value.indexOf(':'),projectKind=separator>0?value.slice(0,separator):'',projectId=separator>0?value.slice(separator+1):'';
     if (action === 'edit-shot') openShotEditor(value);
     if (action === 'reanalyze-shot') document.querySelector(`[data-analyze="${CSS.escape(value)}"]`)?.click();
     if (action === 'delete-shot') document.querySelector(`[data-shot-delete="${CSS.escape(value)}"]`)?.click();
@@ -559,9 +646,30 @@ document.addEventListener('click', async event => {
     if (action === 'insert-script-scene') openSceneEditor(Number(value),'insert');
     if (action === 'delete-script-scene') document.querySelector(`[data-script-delete="${CSS.escape(value)}"]`)?.click();
     if (action === 'regenerate-script') regenerateScript();
+    if (action === 'rename-project') openRenameProject(projectId,projectKind);
+    if (action === 'open-project-folder') await window.feige.invoke('open-project-folder',{id:projectId,kind:projectKind});
+    if (action === 'delete-project') {
+      const project=findProjectInLists(projectId,projectKind);
+      if(project&&window.confirm(t('confirm.deleteProject',{name:project.name}))){
+        try{
+          busy(true,t('progress.deletingProject'));
+          await window.feige.invoke('delete-project',{id:projectId,kind:projectKind});
+          if(state.current?.id===projectId&&state.currentKind===projectKind)clearCurrentProject();
+          await refreshLists();toast(t('toast.projectDeleted'));
+        }catch(error){toast(readableError(error),8000);}
+        finally{busy(false);}
+      }
+    }
     return;
   }
   hideContextMenu();
+
+  const projectMenu=event.target.closest('[data-project-menu]');
+  if(projectMenu){
+    const rect=projectMenu.getBoundingClientRect();
+    showProjectMenu(projectMenu.dataset.projectMenu,projectMenu.dataset.projectKind,rect.right-8,rect.bottom+4);
+    return;
+  }
 
   const nav = event.target.closest('.nav-item');
   if (nav) {
@@ -642,16 +750,20 @@ document.addEventListener('click', async event => {
     return;
   }
 
-  if (event.target.closest('#testProvider')) {
+  if (event.target.closest('#testAllProviders')) {
+    const button=$('#testAllProviders');
     try {
       captureProvider();
-      busy(true, t('progress.testingProvider'));
-      const result = await window.feige.invoke('test-provider', { providerId: state.providerId, provider: state.settings.providers[state.providerId], item: state.current });
-      toast(t('toast.connectionSuccess', { message: result.message }), 6000);
+      button.disabled=true;button.setAttribute('aria-busy','true');
+      button.querySelector('span').textContent=t('progress.testingProviders');
+      state.providerTestResults=null;renderProviderTestResults();
+      const result = await window.feige.invoke('test-providers', { settings:state.settings });
+      state.providerTestResults=result.results;renderProviderTestResults();
+      toast(t(result.ok?'toast.allConnectionsSuccess':'toast.someConnectionsFailed',{connected:result.connected,total:result.total}),7000);
     } catch (error) {
       toast(t('error.connectionFailed', { detail: readableError(error) }), 9000);
     } finally {
-      busy(false);
+      button.disabled=false;button.removeAttribute('aria-busy');button.querySelector('span').textContent=t('action.testAllProviders');
     }
     return;
   }
@@ -660,6 +772,8 @@ document.addEventListener('click', async event => {
 });
 
 document.addEventListener('contextmenu', event => {
+  const navRow=event.target.closest('.nav-row[data-project-id]');
+  if(navRow){event.preventDefault();showProjectMenu(navRow.dataset.projectId,navRow.dataset.projectKind,event.clientX,event.clientY);return;}
   const shotCard=event.target.closest('.shot-card[data-shot-id]');
   if(shotCard){
     event.preventDefault();
@@ -715,7 +829,23 @@ $('#createBtn').onclick = async () => {
   await openProject(project.id, state.newKind);
 };
 
+async function runResearchPipeline() {
+  if(!state.current||state.currentKind!=='research')return;
+  try{
+    closeEditDialogs();clearBanner();
+    busy(true,t('progress.runningResearch'));
+    state.current=await window.feige.invoke('run-style-research',state.current);
+    state.frameCache.clear();
+    await renderCurrent({preserveScroll:false});updateProjectIdentity();activateTab('script');
+    toast(t('toast.researchComplete'),6000);
+  }catch(error){
+    const message=t('error.researchFailed',{detail:readableError(error)});showBanner(message,'error');toast(message,9000);
+    await openProject(state.current.id,'research').catch(()=>{});
+  }finally{busy(false);}
+}
+
 $('#detectBtn').onclick = async () => {
+  if(state.currentKind==='research'){await runResearchPipeline();return;}
   try {
     closeEditDialogs();
     clearBanner();
@@ -757,13 +887,15 @@ $('#cancelTask').onclick = async () => {
 async function regenerateScript() {
   try {
     closeEditDialogs();
-    busy(true, t('progress.generatingScriptFromShots'));
-    state.current = await window.feige.invoke('generate-script', state.current);
+    const research=state.currentKind==='research';
+    busy(true, t(research?'progress.refiningResearch':'progress.generatingScriptFromShots'));
+    state.current = await window.feige.invoke(research?'refine-style-research':'generate-script', state.current);
     renderScriptPanel();
     activateTab('script');
-    toast(t('toast.scriptGenerated'));
+    renderResearchWorkflow();
+    toast(t(research?'toast.researchRefined':'toast.scriptGenerated'));
   } catch (error) {
-    toast(t('error.scriptFailed', { detail: readableError(error) }), 9000);
+    toast(t(state.currentKind==='research'?'error.researchFailed':'error.scriptFailed', { detail: readableError(error) }), 9000);
   } finally {
     busy(false);
   }
@@ -816,6 +948,19 @@ $('#saveSceneEdit').onclick = async () => {
   catch(error){toast(readableError(error),8000);}
 };
 
+$('#saveProjectRename').onclick = async () => {
+  if(!state.renaming)return;
+  const name=$('#renameProjectName').value.trim();
+  if(!name)return toast(t('error.projectNameRequired'));
+  try{
+    const renamed=await window.feige.invoke('rename-project',{...state.renaming,name});
+    if(state.current?.id===renamed.id&&state.currentKind===renamed.kind){state.current=renamed;updateProjectIdentity();}
+    $('#renameProjectDialog').close();state.renaming=null;await refreshLists();toast(t('toast.projectRenamed'));
+  }catch(error){toast(readableError(error),8000);}
+};
+
+$('#renameProjectDialog').addEventListener('close',()=>{state.renaming=null;});
+
 $$('.tab').forEach(tab => {
   tab.onclick = () => activateTab(tab.dataset.tab);
   tab.onkeydown = event => {
@@ -862,6 +1007,7 @@ $$('[data-locale]').forEach(button => {
 
 window.feige.onProgress(payload => {
   state.lastProgress = payload;
+  if(payload.researchWorkflow&&state.currentKind==='research'&&state.current){state.current.researchWorkflow=payload.researchWorkflow;renderResearchWorkflow();}
   const message = localizeRuntimeMessage(payload.message);
   $('#taskStatus').textContent = message;
   if (state.uiBusy) $('#progressText').textContent = message;

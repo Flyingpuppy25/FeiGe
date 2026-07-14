@@ -4,7 +4,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
-const vendorDir = path.join(root, 'vendor');
+const vendorDir = path.join(root, 'vendor', 'win32-x64');
 const tempDir = path.join(root, '.ffmpeg-download');
 const zipPath = path.join(tempDir, 'ffmpeg-lgpl.zip');
 const extractDir = path.join(tempDir, 'expanded');
@@ -44,7 +44,7 @@ async function main() {
   await fsp.mkdir(vendorDir, { recursive: true });
   for (const name of required) await fsp.copyFile(path.join(binDir, name), path.join(vendorDir, name));
   await fsp.rm(tempDir, { recursive: true, force: true });
-  process.stdout.write('FFmpeg is ready in vendor/.\n');
+  process.stdout.write('FFmpeg is ready in vendor/win32-x64/.\n');
 }
 
 main().catch(error => {

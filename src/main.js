@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, net } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, net, Menu } = require('electron');
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
@@ -10,7 +10,8 @@ const { exportHtml, exportStoryboardXlsx, exportScriptDocx, exportAll } = requir
 const { scanVideo } = require('./detection');
 
 const portableRoot = path.dirname(process.execPath);
-if (app.isPackaged) app.setPath('userData', path.join(portableRoot, 'FeiGeData'));
+if (process.platform === 'darwin') app.setName('FeiGe');
+if (app.isPackaged && process.platform === 'win32') app.setPath('userData', path.join(portableRoot, 'FeiGeData'));
 
 let win;
 let analysisController = null;
@@ -148,6 +149,11 @@ async function createUiSmokeFixture() {
   await saveProject(item);
   await fsp.writeFile(scriptVersionPath(item,'smoke-v1'),item.script.replace('今天从这里开始。','旧版本台词。'),'utf8');
   await writeJson(path.join(projectDir(item),'versions.json'),item.scriptVersions);
+  const research={...item,id:'ui-smoke-research',kind:'research',name:'FeiGe 风格研究检查',script:'# 风格研究\n\n## 色彩与光线\n暖色自然光与低饱和环境色形成对比。',scriptVersions:[{id:'research-v1',createdAt:now,providerId:'gemini',providerLabel:'Gemini',model:'gemini-3.1-flash-lite',mediaMode:'research-collage'}],activeScriptVersionId:'research-v1',researchWorkflow:{current:'refine',status:'done',stages:{prepare:{status:'done',detail:'准备完成'},split:{status:'done',detail:'已拆解 2 个镜头'},collage:{status:'done',detail:'镜头拼图已生成'},refine:{status:'done',detail:'风格研究已完成'}}}};
+  research.scriptScenes=splitScriptScenes(research.script);research.storyboard=storyboardMarkdown(research);
+  const researchFrames=path.join(projectDir(research),'frames');await fsp.mkdir(researchFrames,{recursive:true});
+  if(fs.existsSync(source)){await fsp.copyFile(source,path.join(researchFrames,'frame_00001.jpg'));await fsp.copyFile(source,path.join(researchFrames,'frame_00002.jpg'));}
+  await saveProject(research);
 }
 
 async function readJson(file, fallback = null) {
@@ -187,12 +193,12 @@ async function loadSettings(withSecrets = false) {
 }
 
 function toolPath(name) {
-  const exe = `${name}.exe`;
-  const bundled = path.join(process.resourcesPath || '', 'vendor', exe);
-  const development = path.join(__dirname, '..', 'vendor', exe);
+  const executable = process.platform === 'win32' ? `${name}.exe` : name;
+  const bundled = path.join(process.resourcesPath || '', 'vendor', executable);
+  const development = path.join(__dirname, '..', 'vendor', `${process.platform}-${process.arch}`, executable);
   if (app.isPackaged && fs.existsSync(bundled)) return bundled;
   if (fs.existsSync(development)) return development;
-  return fs.existsSync(bundled) ? bundled : name;
+  return fs.existsSync(bundled) ? bundled : executable;
 }
 
 function run(command, args, onLine) {
@@ -258,7 +264,43 @@ async function createProject(kind, videoPath, name) {
   return item;
 }
 
-function projectDir(item) { return path.join(item.kind === 'research' ? researchRoot() : projectsRoot(), item.id); }
+function projectRoot(kind) { return kind === 'research' ? researchRoot() : projectsRoot(); }
+
+function projectDirFromIdentity(kind, id) {
+  const root = path.resolve(projectRoot(kind));
+  const identity = String(id || '');
+  if (!/^[a-zA-Z0-9_-]+$/.test(identity)) throw new Error('项目标识无效');
+  const dir = path.resolve(root, identity);
+  if (!dir.startsWith(`${root}${path.sep}`)) throw new Error('项目路径无效');
+  return dir;
+}
+
+function projectDir(item) { return projectDirFromIdentity(item.kind, item.id); }
+
+async function projectByIdentity(payload) {
+  const kind = payload?.kind === 'research' ? 'research' : 'project';
+  const file = path.join(projectDirFromIdentity(kind, payload?.id), 'project.json');
+  const item = await readJson(file);
+  if (!item) throw new Error('项目不存在或已被删除');
+  return item;
+}
+
+async function renameProject(payload) {
+  const item = await projectByIdentity(payload);
+  const name = String(payload?.name || '').trim().replace(/[\r\n\t]+/g, ' ').slice(0, 120);
+  if (!name) throw new Error('项目名称不能为空');
+  item.name = name;
+  return saveProject(item);
+}
+
+async function deleteProjectByIdentity(payload) {
+  const item = await projectByIdentity(payload);
+  const dir = projectDir(item);
+  const queued = projectSaveQueues.get(path.join(dir, 'project.json'));
+  if (queued) await queued.catch(() => {});
+  await fsp.rm(dir, { recursive:true, force:true });
+  return { ok:true, id:item.id, kind:item.kind };
+}
 
 function scriptVersionPath(item, versionId) {
   return path.join(projectDir(item), 'scripts', `${String(versionId).replace(/[^a-zA-Z0-9_-]/g, '')}.md`);
@@ -289,7 +331,7 @@ async function saveProject(item) {
   return item;
 }
 
-function sendProgress(message, progress = null) { win?.webContents.send('task-progress', { message, progress }); }
+function sendProgress(message, progress = null, extra = {}) { win?.webContents.send('task-progress', { message, progress, ...extra }); }
 
 async function detectScenes(item, options) {
   const settings = await loadSettings(true);
@@ -309,7 +351,7 @@ async function detectScenes(item, options) {
     video: item.videoPath,
     duration: info.duration,
     options: detectionOptions,
-    onProgress: progress => sendProgress(`正在分析场景变化 ${Math.round(progress * 100)}%`, 0.05 + progress * 0.25)
+    onProgress: progress => sendProgress(`正在分析场景变化 ${Math.round(progress * 100)}%`, 0.05 + progress * 0.25, options?.progressStage ? { stage:options.progressStage } : {})
   });
   const duration=info.duration, matches=scan.cuts.map(cut => cut.time), minGap=scan.options.minGap;
   const points = [0];
@@ -679,14 +721,127 @@ async function analyzeAllShots(item,mode='all'){
   return {item,summary:item.analysisSummary};
 }
 
-async function testProvider(payload){
-  const stored=await loadSettings(true),incoming=payload?.provider||{},base=stored.providers[payload?.providerId]||{};
-  const provider={...base,...incoming,apiKey:incoming.apiKey||base.apiKey,apiKeyError:base.apiKeyError&&!incoming.apiKey};
-  let media=null;
-  const item=payload?.item;
-  if(item?.shots?.[0]){const image=await fsp.readFile(path.join(projectDir(item),'frames',item.shots[0].frame));media={images:[dataUrl('image/jpeg',image)]};}
-  const text=await callModel(provider,[{role:'user',content:media?'请简短确认你能看到这张图片，并用中文回复一句话。':'请只回复：FeiGe 接口连接成功。'}],media,{attempts:2,maxTokens:128,timeoutMs:45000});
-  return {ok:true,message:safeText(text,160)};
+async function testProviders(payload){
+  const stored=await loadSettings(true),incoming=mergeSettings(payload?.settings||{});
+  const candidates=Object.entries(incoming.providers).map(([id,provider])=>{
+    const saved=stored.providers[id]||{};
+    return [id,{...saved,...provider,apiKey:provider.apiKey||saved.apiKey,apiKeyError:saved.apiKeyError&&!provider.apiKey}];
+  }).filter(([,provider])=>provider.apiKey&&provider.baseUrl&&provider.model);
+  if(!candidates.length)throw new Error('没有可测试的完整 API 配置，请先填写地址、模型和 API Key');
+  const results=await Promise.all(candidates.map(async([id,provider])=>{
+    const startedAt=Date.now();
+    try{
+      const message=await callModel(provider,[{role:'user',content:'这是 FeiGe API 连接测试。请只回复 OK。'}],null,{attempts:1,maxTokens:32,temperature:0,timeoutMs:30000});
+      return {id,label:provider.label||id,model:provider.model,ok:true,durationMs:Date.now()-startedAt,message:safeText(message,80)};
+    }catch(error){
+      return {id,label:provider.label||id,model:provider.model,ok:false,durationMs:Date.now()-startedAt,error:safeText(error.message,360)};
+    }
+  }));
+  return {ok:results.every(result=>result.ok),connected:results.filter(result=>result.ok).length,total:results.length,results};
+}
+
+const RESEARCH_STAGE_PROGRESS={prepare:.04,split:.2,collage:.68,refine:.82};
+
+async function setResearchStage(item,stage,status,detail=''){
+  const workflow=item.researchWorkflow||{current:null,status:'idle',stages:{}};
+  workflow.current=stage;
+  workflow.status=status==='failed'?'failed':status==='done'&&stage==='refine'?'done':'running';
+  workflow.stages={...workflow.stages,[stage]:{status,detail:safeText(detail,240),updatedAt:Date.now()}};
+  item.researchWorkflow=workflow;
+  await saveProject(item);
+  sendProgress(detail||stage,RESEARCH_STAGE_PROGRESS[stage]??null,{stage,researchWorkflow:workflow});
+}
+
+function evenlySelectedShots(shots,limit=12){
+  if(shots.length<=limit)return shots;
+  const selected=[];
+  for(let index=0;index<limit;index++)selected.push(shots[Math.round(index*(shots.length-1)/(limit-1))]);
+  return selected;
+}
+
+async function buildResearchCollage(item){
+  const shots=evenlySelectedShots(item.shots||[],12);
+  if(!shots.length)throw new Error('没有可用于拼图的分镜');
+  const frameDir=path.join(projectDir(item),'frames'),output=path.join(projectDir(item),'research-collage.jpg');
+  const inputs=[];
+  for(const shot of shots)inputs.push('-i',path.join(frameDir,shot.frame));
+  if(shots.length===1){
+    await run(toolPath('ffmpeg'),['-y',...inputs,'-vf','scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2:color=0x0b0d10','-frames:v','1','-q:v','3',output]);
+  }else{
+    const cols=Math.min(4,shots.length),cellW=320,cellH=180;
+    const normalized=shots.map((_,index)=>`[${index}:v]scale=${cellW}:${cellH}:force_original_aspect_ratio=decrease,pad=${cellW}:${cellH}:(ow-iw)/2:(oh-ih)/2:color=0x0b0d10[v${index}]`).join(';');
+    const streams=shots.map((_,index)=>`[v${index}]`).join('');
+    const layout=shots.map((_,index)=>`${(index%cols)*cellW}_${Math.floor(index/cols)*cellH}`).join('|');
+    await run(toolPath('ffmpeg'),['-y',...inputs,'-filter_complex',`${normalized};${streams}xstack=inputs=${shots.length}:layout=${layout}:fill=0x0b0d10[out]`,'-map','[out]','-frames:v','1','-q:v','3',output]);
+  }
+  item.research={...(item.research||{}),collageFile:path.basename(output),collageShotIds:shots.map(shot=>shot.id),collageUpdatedAt:Date.now()};
+  await saveProject(item);
+  return output;
+}
+
+async function refineResearchReport(item){
+  const settings=await loadSettings(true),provider=settings.providers[settings.activeProvider];
+  const collageFile=item.research?.collageFile&&path.join(projectDir(item),item.research.collageFile);
+  if(!collageFile||!fs.existsSync(collageFile))throw new Error('风格拼图不存在，请重新运行风格研究');
+  const digest=(item.shots||[]).map(shot=>`镜${shot.index} ${shot.startTc}-${shot.endTc} ${[shot.shotSize,shot.angle,shot.movement,shot.description].filter(Boolean).join(' · ')}`).join('\n');
+  const prompt=`你是影视视觉风格研究员。请结合镜头拼图与按时间排序的分镜信息，提炼可复用、可执行的视觉语言。输出中文 Markdown，严格使用以下结构：\n# 风格研究\n## 一句话视觉定位\n## 色彩与光线\n## 构图与景别\n## 镜头运动与剪辑节奏\n## 场景、美术与人物呈现\n## 可复用拍摄规则\n## 避免事项\n不得编造画面中不存在的事实。\n\n分镜摘要：\n${digest}`;
+  const media={images:[{dataUrl:dataUrl('image/jpeg',await fsp.readFile(collageFile)),label:'按时间顺序选取的代表镜头拼图'}]};
+  const report=stripCodeFence(await callModel(provider,[{role:'user',content:prompt}],media,{maxTokens:4096,temperature:.2}));
+  item.script=/^#\s*风格研究/m.test(report)?report:`# 风格研究\n\n${report}`;
+  const stamp=Date.now(),version={id:stamp,createdAt:stamp,providerId:settings.activeProvider,providerLabel:provider.label||settings.activeProvider,model:provider.model||'',mediaMode:'research-collage'};
+  item.scriptScenes=splitScriptScenes(item.script);
+  item.activeScriptVersionId=stamp;
+  item.scriptVersions=[version,...(item.scriptVersions||[])].slice(0,50);
+  item.research={...(item.research||{}),reportFile:'style-research.md',completedAt:stamp};
+  await saveProject(item);
+  await fsp.writeFile(path.join(projectDir(item),'style-research.md'),item.script,'utf8');
+  await writeJson(path.join(projectDir(item),'versions.json'),item.scriptVersions);
+  return item;
+}
+
+async function runStyleResearch(item){
+  if(item.kind!=='research')throw new Error('当前项目不是风格研究');
+  let currentStage='prepare';
+  try{
+    item.status='researching';
+    item.researchWorkflow={current:'prepare',status:'running',stages:{}};
+    await setResearchStage(item,'prepare','running','正在读取视频与研究参数…');
+    const info=await videoInfo(item.videoPath);
+    item.videoMeta=info;item.duration=info.duration;
+    await setResearchStage(item,'prepare','done','准备完成');
+
+    currentStage='split';await setResearchStage(item,'split','running','正在进行分镜拆解…');
+    item=await detectScenes(item,{progressStage:'split'});
+    await setResearchStage(item,'split','done',`已拆解 ${item.shots.length} 个镜头`);
+
+    currentStage='collage';await setResearchStage(item,'collage','running','正在构建代表镜头拼图…');
+    await buildResearchCollage(item);
+    await setResearchStage(item,'collage','done','镜头拼图已生成');
+
+    currentStage='refine';await setResearchStage(item,'refine','running','正在调用 AI 提炼视觉风格…');
+    item=await refineResearchReport(item);
+    item.status='research_complete';
+    await setResearchStage(item,'refine','done','风格研究已完成');
+    sendProgress('风格研究已完成',1,{stage:'refine',researchWorkflow:item.researchWorkflow});
+    return item;
+  }catch(error){
+    item.status='research_failed';
+    await setResearchStage(item,currentStage,'failed',safeText(error.message,240)).catch(()=>{});
+    sendProgress(`风格研究失败：${safeText(error.message,240)}`,1,{stage:currentStage,researchWorkflow:item.researchWorkflow});
+    throw error;
+  }
+}
+
+async function refineStyleResearch(item){
+  if(item.kind!=='research')throw new Error('当前项目不是风格研究');
+  if(!item.shots?.length||!item.research?.collageFile)return runStyleResearch(item);
+  try{
+    await setResearchStage(item,'refine','running','正在重新调用 AI 提炼视觉风格…');
+    item=await refineResearchReport(item);item.status='research_complete';
+    await setResearchStage(item,'refine','done','风格报告新版本已保存');
+    sendProgress('风格报告新版本已保存',1,{stage:'refine',researchWorkflow:item.researchWorkflow});
+    return item;
+  }catch(error){await setResearchStage(item,'refine','failed',safeText(error.message,240)).catch(()=>{});throw error;}
 }
 
 async function generateScript(item){
@@ -840,27 +995,46 @@ async function runUiSmoke(runtimeMessages) {
   const sceneEdited=await win.webContents.executeJavaScript(`document.querySelector('.script-scene pre')?.textContent.includes('界面自动测试修改')`);
   await win.webContents.executeJavaScript(`const select=document.querySelector('#scriptVersion');select.value='smoke-v1';select.dispatchEvent(new Event('change',{bubbles:true}))`);await sleep(420);
   const versionSwitched=await win.webContents.executeJavaScript(`document.querySelector('#scriptEditor').value.includes('旧版本台词')`);
-  await win.webContents.executeJavaScript(`window.confirm=()=>true;document.querySelector('#deleteScriptVersion').click()`);await sleep(420);
-  const versionDeleted=await win.webContents.executeJavaScript(`document.querySelectorAll('#scriptVersion option').length===1`);
+  await win.webContents.executeJavaScript(`window.confirm=()=>true;document.querySelector('#deleteScriptVersion').click()`);
+  let versionDeleted=false;
+  for(let attempt=0;attempt<30;attempt++){
+    versionDeleted=await win.webContents.executeJavaScript(`document.querySelectorAll('#scriptVersion option').length===1`);
+    if(versionDeleted)break;
+    await sleep(100);
+  }
   await win.webContents.executeJavaScript(`document.querySelector('#settingsBtn').click()`);
   for(let attempt=0;attempt<20;attempt++){if(await win.webContents.executeJavaScript(`document.querySelector('#settingsDialog')?.open`))break;await sleep(100);}
   await sleep(500);
   await win.webContents.executeJavaScript(`(()=>{const dialog=document.querySelector('#settingsDialog');if(dialog&&!dialog.open)dialog.showModal();return !!dialog?.open})()`);
   await sleep(200);
-  const settingsState=await win.webContents.executeJavaScript(`({open:document.querySelector('#settingsDialog')?.open,hybrid:document.querySelector('input[name="detectionMode"][value="hybrid"]')?.checked,maxShots:document.querySelector('#setMaxShots')?.value,hardCutFloor:document.querySelector('#setHardCutFloor')?.value})`);
+  const settingsState=await win.webContents.executeJavaScript(`({open:document.querySelector('#settingsDialog')?.open,hybrid:document.querySelector('input[name="detectionMode"][value="hybrid"]')?.checked,maxShots:document.querySelector('#setMaxShots')?.value,hardCutFloor:document.querySelector('#setHardCutFloor')?.value,globalTestButtons:document.querySelectorAll('#testAllProviders').length,legacyTestButtons:document.querySelectorAll('#testProvider').length})`);
   await capture('ui-settings');
   await win.webContents.executeJavaScript(`document.querySelector('#settingsDialog').close()`);
+  await win.webContents.executeJavaScript(`document.querySelector('.nav-row[data-project-kind="project"] .nav-more')?.click()`);await sleep(120);
+  const projectMenuItems=await win.webContents.executeJavaScript(`document.querySelectorAll('#contextMenu:not(.hidden) [role="menuitem"]').length`);
+  await capture('ui-project-menu');
+  await win.webContents.executeJavaScript(`document.querySelector('#contextMenu [data-menu-action="rename-project"]')?.click()`);await sleep(120);
+  const renameDialogOpen=await win.webContents.executeJavaScript(`Boolean(document.querySelector('#renameProjectDialog')?.open)`);
+  await win.webContents.executeJavaScript(`document.querySelector('#renameProjectDialog')?.close()`);
+  await sleep(250);
+  await win.webContents.executeJavaScript(`document.querySelector('.nav-row[data-project-kind="research"] .nav-item')?.click()`);await sleep(1200);
+  await win.webContents.executeJavaScript(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+  const researchState=await win.webContents.executeJavaScript(`({visible:!document.querySelector('#researchWorkflow')?.classList.contains('hidden'),steps:document.querySelectorAll('#researchWorkflow [data-research-stage]').length,done:document.querySelectorAll('#researchWorkflow [data-research-stage].done').length,menuButtons:document.querySelectorAll('.nav-more').length})`);
+  await capture('ui-research-workflow');
   const state=await win.webContents.executeJavaScript(`({title:document.title,hasBridge:!!window.feige,dialogs:document.querySelectorAll('dialog').length,buttons:document.querySelectorAll('button').length,errorText:document.querySelector('#toast')?.textContent||''})`);
-  const checks={contextMenuItems,shotEdited,sceneEdited,versionSwitched,versionDeleted,settingsState,noHorizontalOverflow:viewports.every(view=>!view.bodyOverflow)};
-  const ok=state.hasBridge&&!runtimeMessages.length&&contextMenuItems===3&&shotEdited&&sceneEdited&&versionSwitched&&versionDeleted&&settingsState.open&&settingsState.hybrid&&String(settingsState.maxShots)==='6000'&&checks.noHorizontalOverflow;
+  const checks={contextMenuItems,projectMenuItems,renameDialogOpen,researchState,shotEdited,sceneEdited,versionSwitched,versionDeleted,settingsState,noHorizontalOverflow:viewports.every(view=>!view.bodyOverflow)};
+  const ok=state.hasBridge&&!runtimeMessages.length&&contextMenuItems===3&&projectMenuItems===3&&renameDialogOpen&&researchState.visible&&researchState.steps===4&&researchState.done===4&&researchState.menuButtons>=2&&shotEdited&&sceneEdited&&versionSwitched&&versionDeleted&&settingsState.open&&settingsState.hybrid&&settingsState.globalTestButtons===1&&settingsState.legacyTestButtons===0&&String(settingsState.maxShots)==='6000'&&checks.noHorizontalOverflow;
   await writeJson(path.join(outputDir,'ui-smoke.json'),{ok,checkedAt:Date.now(),state,checks,viewports,captures,runtimeMessages});
   await fsp.rm(path.join(projectsRoot(),UI_SMOKE_PROJECT_ID),{recursive:true,force:true});
+  await fsp.rm(path.join(researchRoot(),'ui-smoke-research'),{recursive:true,force:true});
 }
 
 function createWindow() {
   const uiSmoke = process.argv.includes('--ui-smoke-test');
   const runtimeMessages = [];
-  win = new BrowserWindow({ width:1440,height:900,minWidth:1060,minHeight:680,show:!uiSmoke,backgroundColor:'#0b0d10',title:'FeiGe',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false} });
+  Menu.setApplicationMenu(null);
+  win = new BrowserWindow({ width:1440,height:900,minWidth:1060,minHeight:680,show:!uiSmoke,backgroundColor:'#0b0d10',title:'FeiGe',autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false} });
+  win.setMenuBarVisibility(false);
   win.webContents.on('console-message',(_,details)=>{if(details.level>=2)runtimeMessages.push({level:details.level,message:safeText(details.message,500),line:details.lineNumber,sourceId:path.basename(details.sourceId||'')});});
   win.webContents.on('did-finish-load', async () => {
     try {
@@ -915,6 +1089,36 @@ async function runDetectionSmokeTest(videoPath){
   finally{await fsp.rm(projectDir(item),{recursive:true,force:true});}
 }
 
+async function runResearchMediaSmokeTest(videoPath){
+  const outputDir=path.join(process.cwd(),'outputs'),reportFile=path.join(outputDir,'research-media-smoke.json');await fsp.mkdir(outputDir,{recursive:true});
+  const item={id:'research-media-smoke',kind:'research',name:'research-media-smoke',videoPath,createdAt:Date.now(),updatedAt:Date.now(),shots:[],script:'',storyboard:''};
+  try{
+    await fsp.mkdir(path.join(projectDir(item),'frames'),{recursive:true});
+    await detectScenes(item,{mode:'hybrid',hardCutFloor:5.5,relativeMultiplier:8,classicThreshold:.08,minGap:.5,maxShots:6000,progressStage:'split'});
+    const collage=await buildResearchCollage(item),smokeCollage=path.join(outputDir,'research-collage-smoke.jpg');
+    await fsp.copyFile(collage,smokeCollage);
+    const stat=await fsp.stat(smokeCollage),info=await videoInfo(smokeCollage);
+    await writeJson(reportFile,{ok:item.shots.length>1&&stat.size>0&&info.width>=320&&info.height>=180,checkedAt:Date.now(),source:path.basename(videoPath),shots:item.shots.length,collage:path.basename(smokeCollage),collageBytes:stat.size,width:info.width,height:info.height,selectedFrames:item.research?.collageShotIds?.length||0});
+  }catch(error){await writeJson(reportFile,{ok:false,checkedAt:Date.now(),error:safeText(error.message,500)});}
+  finally{await fsp.rm(projectDir(item),{recursive:true,force:true});}
+}
+
+async function runProjectCrudSmokeTest(){
+  const outputDir=path.join(process.cwd(),'outputs'),reportFile=path.join(outputDir,'project-crud-smoke.json');await fsp.mkdir(outputDir,{recursive:true});
+  let item;
+  try{
+    item=await createProject('research',path.join(process.cwd(),'gemini-smoke-frame.jpg'),'crud-smoke-before');
+    const originalDir=projectDir(item),renamed=await renameProject({kind:item.kind,id:item.id,name:'crud-smoke-after'});
+    const loaded=await projectByIdentity({kind:item.kind,id:item.id});
+    await deleteProjectByIdentity({kind:item.kind,id:item.id});
+    const removed=!fs.existsSync(originalDir);
+    await writeJson(reportFile,{ok:renamed.name==='crud-smoke-after'&&loaded.name==='crud-smoke-after'&&removed,checkedAt:Date.now(),renamed:renamed.name,removed});
+  }catch(error){
+    await writeJson(reportFile,{ok:false,checkedAt:Date.now(),error:safeText(error.message,500)});
+    if(item)await fsp.rm(projectDir(item),{recursive:true,force:true});
+  }
+}
+
 async function runAiConfigSmokeTest(configPath){
   const outputDir=path.join(process.cwd(),'outputs'),reportFile=path.join(outputDir,'ai-smoke.json');await fsp.mkdir(outputDir,{recursive:true});
   try{
@@ -937,19 +1141,27 @@ app.whenReady().then(async()=>{
   if(mediaSmokeArg){await runMediaSmokeTest(mediaSmokeArg.slice('--media-smoke-test='.length));app.quit();return;}
   const detectionSmokeArg=process.argv.find(argument=>argument.startsWith('--detection-smoke-test='));
   if(detectionSmokeArg){await runDetectionSmokeTest(detectionSmokeArg.slice('--detection-smoke-test='.length));app.quit();return;}
+  const researchMediaSmokeArg=process.argv.find(argument=>argument.startsWith('--research-media-smoke-test='));
+  if(researchMediaSmokeArg){await runResearchMediaSmokeTest(researchMediaSmokeArg.slice('--research-media-smoke-test='.length));app.quit();return;}
+  if(process.argv.includes('--project-crud-smoke-test')){await runProjectCrudSmokeTest();app.quit();return;}
   const aiSmokeArg=process.argv.find(argument=>argument.startsWith('--ai-config-smoke-test='));
   if(aiSmokeArg){await runAiConfigSmokeTest(aiSmokeArg.slice('--ai-config-smoke-test='.length));app.quit();return;}
   createWindow();
 });
 app.on('window-all-closed',()=>{ if(process.platform!=='darwin') app.quit(); });
+app.on('activate',()=>{ if(BrowserWindow.getAllWindows().length===0) createWindow(); });
 
 ipcMain.handle('set-ui-language',(_,locale)=>{uiLocale=normalizeUiLocale(locale);return uiLocale;});
 ipcMain.handle('choose-video',async()=>{ const r=await dialog.showOpenDialog(win,{title:nativeDialogText('chooseVideoTitle'),properties:['openFile'],filters:[{name:nativeDialogText('videoFiles'),extensions:['mp4','mov','mkv','avi','webm','m4v','ts']}]}); return r.canceled?null:r.filePaths[0]; });
 ipcMain.handle('list-all',async()=>({projects:await listKind(projectsRoot()),research:await listKind(researchRoot())}));
 ipcMain.handle('create-project',async(_,payload)=>createProject(payload.kind,payload.videoPath,payload.name));
-ipcMain.handle('load-project',async(_,payload)=>readJson(path.join(payload.kind==='research'?researchRoot():projectsRoot(),payload.id,'project.json')));
+ipcMain.handle('load-project',async(_,payload)=>projectByIdentity(payload));
 ipcMain.handle('save-project',async(_,item)=>saveProject(item));
+ipcMain.handle('rename-project',async(_,payload)=>renameProject(payload));
+ipcMain.handle('delete-project',async(_,payload)=>deleteProjectByIdentity(payload));
 ipcMain.handle('detect-scenes',async(_,payload)=>detectScenes(payload.item,payload.options));
+ipcMain.handle('run-style-research',async(_,item)=>runStyleResearch(item));
+ipcMain.handle('refine-style-research',async(_,item)=>refineStyleResearch(item));
 ipcMain.handle('analyze-shot',async(_,payload)=>analyzeShot(payload.item,payload.shotId));
 ipcMain.handle('analyze-all-shots',async(_,payload)=>analyzeAllShots(payload.item,payload.mode||'all'));
 ipcMain.handle('cancel-analysis',async()=>{if(analysisController)analysisController.cancelled=true;return true;});
@@ -960,7 +1172,7 @@ ipcMain.handle('delete-script-version',async(_,payload)=>deleteScriptVersion(pay
 ipcMain.handle('update-shot',async(_,payload)=>updateShot(payload.item,payload.shotId,payload.changes));
 ipcMain.handle('delete-shot',async(_,payload)=>deleteShot(payload.item,payload.shotId));
 ipcMain.handle('get-settings',async()=>loadSettings(false));
-ipcMain.handle('test-provider',async(_,payload)=>testProvider(payload));
+ipcMain.handle('test-providers',async(_,payload)=>testProviders(payload));
 ipcMain.handle('save-settings',async(_,settings)=>{ const current=await loadSettings(true); const merged=mergeSettings(settings); for(const [id,p] of Object.entries(merged.providers)){ const key=p.apiKey||current.providers[id]?.apiKey||''; p.apiKey=encrypt(key); delete p.hasApiKey; delete p.apiKeyError; } await writeJson(settingsFile(),merged); return true; });
 ipcMain.handle('export-file',async(_,payload)=>{
   let item=await prepareExportItem(payload.item);
