@@ -63,8 +63,10 @@ function macPackagingTests() {
   assert(main.includes("vendor', `${process.platform}-${process.arch}`"),'platform-specific development tools');
   for(const value of ["minimumSystemVersion: '12.0'","identity: '-'","hardenedRuntime: false","`darwin-${arch}`"])assert(config.includes(value),`mac config ${value}`);
   for(const value of ['macos-15-intel','macos-15','arch: x64','arch: arm64','permissions:','contents: read','actions/upload-artifact@v4'])assert(workflow.includes(value),`mac workflow ${value}`);
+  assert(workflow.includes("if: matrix.arch == 'x64'") && workflow.includes('brew install nasm'),'Intel FFmpeg assembler');
   assert(!workflow.includes('contents: write') && !workflow.includes('softprops/action-gh-release'),'workflow must not publish automatically');
   for(const value of ['FFMPEG_VERSION="7.1.5"','de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f','--enable-shared','--disable-gpl','--disable-nonfree',"--install-name-dir='@executable_path'"])assert(buildFfmpeg.includes(value),`mac FFmpeg ${value}`);
+  assert(buildFfmpeg.includes("sed '/:$/d'"),'otool dependency rows exclude absolute-path headings');
   for(const value of ['ditto -c -k --sequesterRsrc --keepParent','codesign --verify --deep --strict','macOS使用说明.txt'])assert(packageMac.includes(value),`mac package ${value}`);
 }
 

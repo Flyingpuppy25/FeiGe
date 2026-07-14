@@ -60,7 +60,11 @@ codesign --force --sign - "$VENDOR/ffmpeg" "$VENDOR/ffprobe"
 "$VENDOR/ffprobe" -hide_banner -version
 "$VENDOR/ffmpeg" -hide_banner -filters | grep -q 'xstack'
 
-if otool -L "$VENDOR/ffmpeg" "$VENDOR/ffprobe" "$VENDOR/"*.dylib | grep -E '/(usr/local|opt/homebrew|private/tmp|Users)/'; then
+# otool prints each inspected file's absolute path as a heading ending in a
+# colon. Ignore those headings and inspect dependency rows only.
+if otool -L "$VENDOR/ffmpeg" "$VENDOR/ffprobe" "$VENDOR/"*.dylib \
+  | sed '/:$/d' \
+  | grep -E '/(usr/local|opt/homebrew|private/tmp|Users)/'; then
   echo 'FFmpeg contains a non-portable library reference.' >&2
   exit 1
 fi

@@ -39,6 +39,10 @@ jobs:
       - name: Run self-tests
         run: npm test
 
+      - name: Install Intel FFmpeg assembler
+        if: matrix.arch == 'x64'
+        run: brew install nasm
+
       - name: Build portable LGPL FFmpeg
         run: bash scripts/build-ffmpeg-macos.sh
 
